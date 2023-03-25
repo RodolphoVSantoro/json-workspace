@@ -28,7 +28,21 @@ pub struct JSONWorksPace {
     file_store: JSONWorksPaceFileStore,
 }
 
-fn parse_curl(input: &str) -> Result<StringRequest, Box<dyn Error>> {
+#[derive(Debug)]
+struct FileTreeLoadingError(&'static str);
+
+impl std::fmt::Display for FileTreeLoadingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        return write!(f, "There was an error instantiating a FileTree: {}", self.0);
+    }
+}
+
+impl Error for FileTreeLoadingError {}
+
+/// # Errors
+///
+/// Will return `Err` if it fails to parse the curl request.
+pub fn parse_curl(input: &str) -> Result<StringRequest, Box<dyn Error>> {
     let parsed = match ParsedRequest::load(input, Some(())) {
         Ok(parsed) => parsed,
         Err(e) => return Err(Box::new(e)),
@@ -48,6 +62,9 @@ fn parse_curl(input: &str) -> Result<StringRequest, Box<dyn Error>> {
     });
 }
 
+/// # Errors
+///
+/// Will return `Err` if it fails to convert the header content to a HasMap<string, string>.
 fn get_headers(parsed: &ParsedRequest) -> Result<HashMap<String, String>, Box<dyn Error>> {
     let mut headers: HashMap<String, String> = HashMap::new();
     let header_results = parsed.headers.iter().map(|header| {
@@ -70,6 +87,10 @@ fn get_headers(parsed: &ParsedRequest) -> Result<HashMap<String, String>, Box<dy
 }
 
 impl FileTree {
+    /// # Errors
+    ///
+    /// Will return `Err` if it fails to read the directory.
+    /// Will return `Err` if it fails to read a directory entry.
     fn new(path: String) -> Result<Box<FileTree>, Box<dyn Error>> {
         let dir = match fs::read_dir(&path) {
             Ok(dir) => dir,
@@ -106,7 +127,10 @@ impl FileTree {
 }
 
 impl StringRequest {
-    fn to_beautified_json(&self) -> Result<String, Box<dyn Error>> {
+    /// # Errors
+    ///
+    /// Will return `Err` if it fails to serialize the request to JSON.
+    pub fn to_beautified_json(&self) -> Result<String, Box<dyn Error>> {
         let json = match serde_json::to_string_pretty(&self) {
             Ok(json) => json,
             Err(e) => return Err(Box::new(e)),
@@ -122,6 +146,10 @@ impl JSONWorksPaceFileStore {
             file_tree: None,
         };
     }
+    /// # Errors
+    ///
+    /// Will return `Err` if it fails to load the file contents.
+    /// Will return `Err` if it fails to load the file contents into the file store.
     pub fn load_file(&mut self, path: String) -> Result<Option<&String>, Box<dyn Error>> {
         let file_refs = &mut self.file_refs;
         let read_path = path.clone();
@@ -153,6 +181,10 @@ impl JSONWorksPaceFileStore {
             self.alloc_file_refs(folder);
         }
     }
+    /// # Errors
+    ///
+    /// Will return `Err` if the file tree was not loaded before
+    /// and it fails to instantiate it.
     pub fn get_file_tree(&mut self, path: String) -> Result<&FileTree, Box<dyn Error>> {
         match self.file_tree {
             Some(_) => (),
@@ -161,11 +193,15 @@ impl JSONWorksPaceFileStore {
                     Ok(file_tree) => Some(file_tree),
                     Err(e) => return Err(e),
                 };
-                self.alloc_file_refs(
-                    new_file_tree
-                        .as_ref()
-                        .expect("Failed to instantiate file tree"),
-                );
+                let new_file_tree_ref = match new_file_tree.as_ref() {
+                    Some(file_tree) => file_tree,
+                    None => {
+                        return Err(Box::new(FileTreeLoadingError(
+                            "Tried to reference a file tree that was not loaded",
+                        )))
+                    }
+                };
+                self.alloc_file_refs(new_file_tree_ref);
                 self.file_tree = new_file_tree;
             }
         };
@@ -173,7 +209,7 @@ impl JSONWorksPaceFileStore {
             Some(file_tree) => {
                 return Ok(file_tree);
             }
-            None => panic!("Failed to instantiate file tree"),
+            None => return Err(Box::new(FileTreeLoadingError("Loaded empty file tree"))),
         }
     }
 }
@@ -186,6 +222,10 @@ impl JSONWorksPace {
             file_store: JSONWorksPaceFileStore::new(),
         };
     }
+    /// # Errors
+    ///
+    /// Will return `Err` if `JSONWokrsPace.location` does not exist or the user does not have
+    /// permission to read it.
     pub fn load_file_tree(&mut self) -> Result<&FileTree, Box<dyn Error>> {
         return match self.file_store.get_file_tree(self.location.clone()) {
             Ok(file_tree) => Ok(file_tree),
@@ -195,6 +235,10 @@ impl JSONWorksPace {
     pub fn get_location(&self) -> &String {
         return &(self.location);
     }
+    /// # Errors
+    ///
+    /// Will return `Err` if `filename` does not exist or the user does not have
+    /// permission to read it.
     pub fn load_file(&mut self, path: String) -> Result<String, Box<dyn Error>> {
         match self.file_store.load_file(path) {
             Ok(content) => match content {
@@ -209,24 +253,4 @@ impl JSONWorksPace {
             Err(e) => return Err(e),
         }
     }
-}
-
-pub fn lib() {
-    let mut jwp = Box::new(JSONWorksPace::new(Some(".\\test_jwp")));
-    let json_file_string = jwp
-        .load_file(String::from(".\\test_jwp\\test2.json"))
-        .unwrap();
-    println!("{json_file_string}");
-    let curl_file_string = jwp
-        .load_file(String::from(".\\test_jwp\\test1.curl"))
-        .unwrap();
-    let curl_request = parse_curl(&curl_file_string).unwrap();
-    let curl_request_as_json = curl_request.to_beautified_json().unwrap();
-    println!("{curl_request_as_json}");
-    let empty_file_string = jwp
-        .load_file(String::from(".\\test_jwp\\empty.json"))
-        .unwrap();
-    println!("'{empty_file_string}'");
-    let file_tree = jwp.load_file_tree().unwrap();
-    println!("{file_tree:?}");
 }
