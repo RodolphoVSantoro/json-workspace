@@ -12,57 +12,20 @@ pub struct StringRequest {
     headers: HashMap<String, String>,
 }
 
-struct JSONWorksPaceFileStore {
-    file_refs: HashMap<String, Option<Box<String>>>,
-    file_tree: Option<Box<FileTree>>,
-}
-
 #[derive(Serialize, Debug)]
 pub struct FileTree {
     folder_paths: Vec<FileTree>,
     file_paths: Vec<String>,
     current_path: String,
 }
+struct JSONWorksPaceFileStore {
+    file_refs: HashMap<String, Option<String>>,
+    file_tree: Option<Box<FileTree>>,
+}
 
 pub struct JSONWorksPace {
     location: String,
     file_store: JSONWorksPaceFileStore,
-}
-
-impl FileTree {
-    fn new(path: String) -> Result<Box<FileTree>, Box<dyn Error>> {
-        let dir = match fs::read_dir(&path) {
-            Ok(dir) => dir,
-            Err(e) => return Err(Box::new(e)),
-        };
-        let mut dir_entries = vec![];
-        for entry in dir {
-            match entry {
-                Ok(entry) => dir_entries.push(entry),
-                Err(e) => return Err(Box::new(e)),
-            };
-        }
-
-        let mut this_file_tree = Box::new(FileTree {
-            folder_paths: vec![],
-            file_paths: vec![],
-            current_path: path,
-        });
-
-        for entry in dir_entries {
-            let path = entry.path();
-            let path_string = path.to_string_lossy().into_owned();
-            if path.is_dir() {
-                match FileTree::new(path_string) {
-                    Ok(file_tree) => this_file_tree.folder_paths.push(*file_tree),
-                    Err(e) => return Err(e),
-                };
-            } else {
-                this_file_tree.file_paths.push(path_string);
-            }
-        }
-        return Ok(this_file_tree);
-    }
 }
 
 fn parse_curl(input: &str) -> Result<StringRequest, Box<dyn Error>> {
@@ -106,8 +69,44 @@ fn get_headers(parsed: &ParsedRequest) -> Result<HashMap<String, String>, Box<dy
     return Ok(headers);
 }
 
+impl FileTree {
+    fn new(path: String) -> Result<Box<FileTree>, Box<dyn Error>> {
+        let dir = match fs::read_dir(&path) {
+            Ok(dir) => dir,
+            Err(e) => return Err(Box::new(e)),
+        };
+        let mut dir_entries = vec![];
+        for entry in dir {
+            match entry {
+                Ok(entry) => dir_entries.push(entry),
+                Err(e) => return Err(Box::new(e)),
+            };
+        }
+
+        let mut this_file_tree = Box::new(FileTree {
+            folder_paths: vec![],
+            file_paths: vec![],
+            current_path: path,
+        });
+
+        for entry in dir_entries {
+            let path = entry.path();
+            let path_string = path.to_string_lossy().into_owned();
+            if path.is_dir() {
+                match FileTree::new(path_string) {
+                    Ok(file_tree) => this_file_tree.folder_paths.push(*file_tree),
+                    Err(e) => return Err(e),
+                };
+            } else {
+                this_file_tree.file_paths.push(path_string);
+            }
+        }
+        return Ok(this_file_tree);
+    }
+}
+
 impl StringRequest {
-    fn into_beautified_json(&self) -> Result<String, Box<dyn Error>> {
+    fn to_beautified_json(&self) -> Result<String, Box<dyn Error>> {
         let json = match serde_json::to_string_pretty(&self) {
             Ok(json) => json,
             Err(e) => return Err(Box::new(e)),
@@ -123,7 +122,7 @@ impl JSONWorksPaceFileStore {
             file_tree: None,
         };
     }
-    pub fn load_file(&mut self, path: String) -> Result<Option<&Box<String>>, Box<dyn Error>> {
+    pub fn load_file(&mut self, path: String) -> Result<Option<&String>, Box<dyn Error>> {
         let file_refs = &mut self.file_refs;
         let read_path = path.clone();
         if *(&file_refs.get(&path).unwrap_or(&None).is_none()) {
@@ -131,7 +130,7 @@ impl JSONWorksPaceFileStore {
                 Ok(string_content) => Box::new(string_content),
                 Err(e) => return Err(Box::new(e)),
             };
-            file_refs.insert(path, Some(file_content));
+            file_refs.insert(path, Some(*file_content));
         }
 
         match file_refs.get(&read_path) {
@@ -154,7 +153,7 @@ impl JSONWorksPaceFileStore {
             self.alloc_file_refs(folder);
         }
     }
-    pub fn get_file_tree(&mut self, path: String) -> Result<&Box<FileTree>, Box<dyn Error>> {
+    pub fn get_file_tree(&mut self, path: String) -> Result<&FileTree, Box<dyn Error>> {
         match self.file_tree {
             Some(_) => (),
             None => {
@@ -187,7 +186,7 @@ impl JSONWorksPace {
             file_store: JSONWorksPaceFileStore::new(),
         };
     }
-    pub fn load_file_tree(&mut self) -> Result<&Box<FileTree>, Box<dyn Error>> {
+    pub fn load_file_tree(&mut self) -> Result<&FileTree, Box<dyn Error>> {
         return match self.file_store.get_file_tree(self.location.clone()) {
             Ok(file_tree) => Ok(file_tree),
             Err(e) => Err(e),
@@ -222,7 +221,7 @@ pub fn lib() {
         .load_file(String::from(".\\test_jwp\\test1.curl"))
         .unwrap();
     let curl_request = parse_curl(&curl_file_string).unwrap();
-    let curl_request_as_json = curl_request.into_beautified_json().unwrap();
+    let curl_request_as_json = curl_request.to_beautified_json().unwrap();
     println!("{curl_request_as_json}");
     let empty_file_string = jwp
         .load_file(String::from(".\\test_jwp\\empty.json"))
