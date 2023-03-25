@@ -1,0 +1,7 @@
+curl \
+-X POST \
+-d '{"visibility":"private"}' \
+-H "Accept: application/vnd.github+json" \
+-H "Authorization: Bearer test" \
+-H "content-type: text/json" \
+http://localhost:3000
